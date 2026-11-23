@@ -1,0 +1,64 @@
+# ==============================================================================
+# PART 1: NAMESPACE
+# Creates the 'devops' namespace to isolate all resources for this task.
+# ==============================================================================
+apiVersion: v1                # Core Kubernetes API version
+kind: Namespace               # Resource type: Namespace
+metadata:
+  name: devops                # Matches the namespace requested in the prompt
+
+---
+# ==============================================================================
+# PART 2: CONFIGMAP
+# Stores the sleep interval (11 seconds) outside the container image.
+# ==============================================================================
+apiVersion: v1                # Core Kubernetes API version
+kind: ConfigMap               # Resource type: ConfigMap
+metadata:
+  name: time-config           # Name of the ConfigMap referenced by the Pod
+  namespace: devops           # Must live in the same namespace as the Pod
+data:                         # Key-value pairs of configuration data
+  TIME_FREQ: "11"             # Key=TIME_FREQ, Value="11" (quotes keep it a string)
+
+---
+# ==============================================================================
+# PART 3: POD
+# Runs the busybox container that writes timestamps to the mounted log volume.
+# ==============================================================================
+apiVersion: v1                # Core Kubernetes API version
+kind: Pod                     # Resource type: Pod
+metadata:
+  name: time-check            # Name of the Pod
+  namespace: devops           # Deploys the Pod inside the 'devops' namespace
+spec:                         # Desired configuration for the Pod
+  containers:                 # List of containers inside this Pod
+  - name: time-check          # Container name
+    image: busybox:latest     # Lightweight Linux image with basic shell utilities
+
+    # 1. STARTUP COMMAND
+    # Overrides default entrypoint to run an infinite logging loop.
+    command: ["/bin/sh", "-c"]
+    args:
+      # Prints date -> sleeps for $TIME_FREQ (11s) -> appends (>>) to log file
+      - "while true; do date; sleep $TIME_FREQ;done >> /opt/data/time/time-check.log"
+
+    # 2. ENVIRONMENT VARIABLES
+    # Pulls TIME_FREQ from the 'time-config' ConfigMap into the container's OS.
+    env:
+    - name: TIME_FREQ         # Environment variable name inside the container
+      valueFrom:              # Tells Kubernetes to fetch the value dynamically
+        configMapKeyRef:      # Look inside a ConfigMap
+          name: time-config   # Name of the ConfigMap created in Part 2
+          key: TIME_FREQ      # Key inside 'time-config' to read
+
+    # 3. VOLUME MOUNTS (Container side)
+    # Maps the Pod's storage volume to '/opt/data/time' inside the container.
+    volumeMounts:
+    - name: log-volume        # Must match the volume name under 'spec.volumes'
+      mountPath: /opt/data/time  # Folder path inside the container where logs go
+
+  # 4. VOLUMES (Pod side)
+  # Defines the temporary storage shared by containers in this Pod.
+  volumes:
+  - name: log-volume          # Logical volume name referenced above
+    emptyDir: {}              # Temporary directory created on the node for the Pod's lifespan
